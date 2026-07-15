@@ -17,41 +17,71 @@ const generatePdfSummary = async (req, res) => {
       });
     }
 
-    // Read PDF
-    const buffer = fs.readFileSync(document.filepath);
-
-    // Extract text
-    const data = await pdfParse(buffer);
-
-    // Save full PDF content for Chat AI
-    document.content = data.text;
-
-    // Limit text size for AI Summary
-    let text = data.text || "";
-
-    if (text.length > 8000) {
-      text = text.substring(0, 8000);
+    if (document.fileType && document.fileType !== "pdf") {
+      return res.status(400).json({
+        success: false,
+        message: "AI summary is currently available only for PDF files",
+      });
     }
 
-    // Generate AI Summary
-    const summary = await generateSummary(text);
+    let text = document.content?.trim() || "";
 
-    // Save summary
-    document.summary = summary;
+    // Fallback: extract again only when database content is empty
+    if (!text) {
+      if (!document.filepath || !fs.existsSync(document.filepath)) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "The PDF file is no longer available on the server. Please upload it again.",
+        });
+      }
 
+      const buffer = fs.readFileSync(document.filepath);
+      const parsedPdf = await pdfParse(buffer);
+
+      text = parsedPdf.text?.trim() || "";
+
+      if (text) {
+        document.content = text;
+      }
+    }
+
+    // Scanned or image-based PDF
+    if (text.length < 50) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "No readable text was found. This PDF may be scanned or image-based.",
+      });
+    }
+
+    // Prevent very large AI requests
+    const summaryInput = text.slice(0, 12000);
+
+    const summary = await generateSummary(summaryInput);
+
+    if (!summary || !summary.trim()) {
+      return res.status(502).json({
+        success: false,
+        message: "AI returned an empty summary. Please try again.",
+      });
+    }
+
+    document.summary = summary.trim();
     await document.save();
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Summary generated successfully",
-      summary,
+      summary: document.summary,
+      truncated: text.length > summaryInput.length,
     });
   } catch (error) {
     console.error("Summary Error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      message: error.message,
+      message: error.message || "Summary generation failed",
     });
   }
 };
