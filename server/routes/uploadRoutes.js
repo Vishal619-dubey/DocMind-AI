@@ -9,19 +9,33 @@ const Document = require("../models/Document");
 const router = express.Router();
 
 /* =====================================
+   Upload Directory
+===================================== */
+
+const uploadDirectory = path.join(process.cwd(), "uploads");
+
+// Render par folder missing ho to automatically create hoga
+if (!fs.existsSync(uploadDirectory)) {
+  fs.mkdirSync(uploadDirectory, {
+    recursive: true,
+  });
+}
+
+/* =====================================
    Storage
 ===================================== */
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, "uploads/");
+    cb(null, uploadDirectory);
   },
 
   filename: (req, file, cb) => {
-    const uniqueName =
-      Date.now() +
-      "-" +
-      file.originalname.replace(/\s+/g, "-");
+    const safeOriginalName = file.originalname
+      .replace(/\s+/g, "-")
+      .replace(/[^a-zA-Z0-9._-]/g, "");
+
+    const uniqueName = `${Date.now()}-${safeOriginalName}`;
 
     cb(null, uniqueName);
   },
@@ -36,11 +50,9 @@ const allowedTypes = [
 
   "image/png",
   "image/jpeg",
-  "image/jpg",
   "image/webp",
 
   "audio/mpeg",
-  "audio/mp3",
   "audio/wav",
   "audio/x-wav",
   "audio/mp4",
@@ -50,9 +62,7 @@ const allowedTypes = [
   "video/x-msvideo",
 
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 
   "text/plain",
@@ -60,17 +70,17 @@ const allowedTypes = [
 
 const fileFilter = (req, file, cb) => {
   if (allowedTypes.includes(file.mimetype)) {
-    cb(null, true);
-  } else {
-    cb(new Error("Unsupported File Type"), false);
+    return cb(null, true);
   }
+
+  cb(new Error("Unsupported file type"));
 };
 
 const upload = multer({
   storage,
   fileFilter,
   limits: {
-    fileSize: 100 * 1024 * 1024, //100MB
+    fileSize: 100 * 1024 * 1024,
   },
 });
 
@@ -78,21 +88,14 @@ const upload = multer({
    Detect File Type
 ===================================== */
 
-function getFileType(mimetype) {
+function getFileType(mimetype = "") {
   if (mimetype.includes("pdf")) return "pdf";
-
-  if (mimetype.startsWith("image")) return "image";
-
-  if (mimetype.startsWith("audio")) return "audio";
-
-  if (mimetype.startsWith("video")) return "video";
-
-  if (mimetype.includes("word")) return "docx";
-
-  if (mimetype.includes("spreadsheet")) return "xlsx";
-
-  if (mimetype.includes("presentation")) return "pptx";
-
+  if (mimetype.startsWith("image/")) return "image";
+  if (mimetype.startsWith("audio/")) return "audio";
+  if (mimetype.startsWith("video/")) return "video";
+  if (mimetype.includes("wordprocessingml")) return "docx";
+  if (mimetype.includes("spreadsheetml")) return "xlsx";
+  if (mimetype.includes("presentationml")) return "pptx";
   if (mimetype.includes("text")) return "txt";
 
   return "other";
@@ -102,62 +105,65 @@ function getFileType(mimetype) {
    Upload Route
 ===================================== */
 
-router.post("/", upload.single("file"), async (req, res) => {
-  try {
+router.post("/", (req, res) => {
+  upload.single("file")(req, res, async (uploadError) => {
+    if (uploadError) {
+      console.error("Multer Error:", uploadError);
 
-    if (!req.file) {
       return res.status(400).json({
         success: false,
-        message: "No file uploaded",
+        message: uploadError.message,
       });
     }
 
-    const fileType = getFileType(req.file.mimetype);
+    try {
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          message: "No file uploaded",
+        });
+      }
 
-    let extractedContent = "";
+      const fileType = getFileType(req.file.mimetype);
 
-    /* PDF Text Extraction */
+      let extractedContent = "";
 
-    if (fileType === "pdf") {
-      const buffer = fs.readFileSync(req.file.path);
+      if (fileType === "pdf") {
+        const buffer = fs.readFileSync(req.file.path);
+        const parsedPdf = await pdfParse(buffer);
 
-      const pdf = await pdfParse(buffer);
+        extractedContent = parsedPdf.text || "";
+      }
 
-      extractedContent = pdf.text;
+      const document = await Document.create({
+        filename: req.file.originalname,
+        filepath: req.file.path,
+        filesize: req.file.size,
+        mimeType: req.file.mimetype,
+        fileType,
+        content: extractedContent,
+        uploadedBy: null,
+      });
+
+      return res.status(201).json({
+        success: true,
+        message: "File uploaded successfully",
+        document,
+      });
+    } catch (error) {
+      console.error("Upload Error:", error);
+
+      // Failed database/PDF operation ke baad temporary file remove karo
+      if (req.file?.path && fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
+
+      return res.status(500).json({
+        success: false,
+        message: error.message || "File upload failed",
+      });
     }
-
-    const document = await Document.create({
-      filename: req.file.originalname,
-
-      filepath: req.file.path,
-
-      filesize: req.file.size,
-
-      mimeType: req.file.mimetype,
-
-      fileType,
-
-      content: extractedContent,
-
-      uploadedBy: null,
-    });
-
-    res.status(201).json({
-      success: true,
-      message: "File Uploaded Successfully",
-      document,
-    });
-
-  } catch (err) {
-
-    console.log(err);
-
-    res.status(500).json({
-      success: false,
-      message: err.message,
-    });
-
-  }
+  });
 });
 
 module.exports = router;
