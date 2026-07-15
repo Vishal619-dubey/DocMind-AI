@@ -3,20 +3,17 @@ const fs = require("fs");
 const path = require("path");
 
 const Document = require("../models/Document");
-const { protect } = require("../middleware/authMiddleware");
 const { addActivity } = require("../controllers/activityController");
 
 const router = express.Router();
 
-/* =====================================
-   GET LOGGED-IN USER DOCUMENTS
-===================================== */
+/* ===========================
+   Get All Documents
+=========================== */
 
-router.get("/", protect, async (req, res) => {
+router.get("/", async (req, res) => {
   try {
-    const documents = await Document.find({
-      uploadedBy: req.user._id,
-    }).sort({
+    const documents = await Document.find().sort({
       createdAt: -1,
     });
 
@@ -31,26 +28,23 @@ router.get("/", protect, async (req, res) => {
   }
 });
 
-/* =====================================
-   PREVIEW DOCUMENT
-===================================== */
+/* ===========================
+   Preview Document
+=========================== */
 
-router.get("/view/:id", protect, async (req, res) => {
+router.get("/view/:id", async (req, res) => {
   try {
-    const document = await Document.findOne({
-      _id: req.params.id,
-      uploadedBy: req.user._id,
-    });
+    const document = await Document.findById(req.params.id);
 
     if (!document) {
       return res.status(404).json({
         success: false,
-        message: "Document not found or access denied",
+        message: "Document not found",
       });
     }
 
     if (!document.filepath || !fs.existsSync(document.filepath)) {
-      return res.status(410).json({
+      return res.status(404).json({
         success: false,
         message:
           "Document file is no longer available. Please upload it again.",
@@ -64,7 +58,7 @@ router.get("/view/:id", protect, async (req, res) => {
 
     return res.sendFile(path.resolve(document.filepath));
   } catch (error) {
-    console.error("Preview Document Error:", error);
+    console.error("Preview Error:", error);
 
     return res.status(500).json({
       success: false,
@@ -73,26 +67,23 @@ router.get("/view/:id", protect, async (req, res) => {
   }
 });
 
-/* =====================================
-   DOWNLOAD DOCUMENT
-===================================== */
+/* ===========================
+   Download Document
+=========================== */
 
-router.get("/download/:id", protect, async (req, res) => {
+router.get("/download/:id", async (req, res) => {
   try {
-    const document = await Document.findOne({
-      _id: req.params.id,
-      uploadedBy: req.user._id,
-    });
+    const document = await Document.findById(req.params.id);
 
     if (!document) {
       return res.status(404).json({
         success: false,
-        message: "Document not found or access denied",
+        message: "Document not found",
       });
     }
 
     if (!document.filepath || !fs.existsSync(document.filepath)) {
-      return res.status(410).json({
+      return res.status(404).json({
         success: false,
         message:
           "Document file is no longer available. Please upload it again.",
@@ -108,7 +99,7 @@ router.get("/download/:id", protect, async (req, res) => {
       document.filename
     );
   } catch (error) {
-    console.error("Download Document Error:", error);
+    console.error("Download Error:", error);
 
     return res.status(500).json({
       success: false,
@@ -117,21 +108,18 @@ router.get("/download/:id", protect, async (req, res) => {
   }
 });
 
-/* =====================================
-   TOGGLE FAVORITE
-===================================== */
+/* ===========================
+   Favorite
+=========================== */
 
-router.put("/favorite/:id", protect, async (req, res) => {
+router.put("/favorite/:id", async (req, res) => {
   try {
-    const document = await Document.findOne({
-      _id: req.params.id,
-      uploadedBy: req.user._id,
-    });
+    const document = await Document.findById(req.params.id);
 
     if (!document) {
       return res.status(404).json({
         success: false,
-        message: "Document not found or access denied",
+        message: "Document not found",
       });
     }
 
@@ -139,14 +127,21 @@ router.put("/favorite/:id", protect, async (req, res) => {
 
     await document.save();
 
-    await addActivity(
-      document.favorite
-        ? "Added to Favorites"
-        : "Removed from Favorites",
-      document.filename,
-      "star",
-      "yellow"
-    );
+    try {
+      await addActivity(
+        document.favorite
+          ? "Added to Favorites"
+          : "Removed from Favorites",
+        document.filename,
+        "star",
+        "yellow"
+      );
+    } catch (activityError) {
+      console.error(
+        "Favorite Activity Error:",
+        activityError.message
+      );
+    }
 
     return res.status(200).json({
       success: true,
@@ -156,7 +151,7 @@ router.put("/favorite/:id", protect, async (req, res) => {
       favorite: document.favorite,
     });
   } catch (error) {
-    console.error("Favorite Document Error:", error);
+    console.error("Favorite Error:", error);
 
     return res.status(500).json({
       success: false,
@@ -165,21 +160,18 @@ router.put("/favorite/:id", protect, async (req, res) => {
   }
 });
 
-/* =====================================
-   TOGGLE PIN
-===================================== */
+/* ===========================
+   Pin
+=========================== */
 
-router.put("/pin/:id", protect, async (req, res) => {
+router.put("/pin/:id", async (req, res) => {
   try {
-    const document = await Document.findOne({
-      _id: req.params.id,
-      uploadedBy: req.user._id,
-    });
+    const document = await Document.findById(req.params.id);
 
     if (!document) {
       return res.status(404).json({
         success: false,
-        message: "Document not found or access denied",
+        message: "Document not found",
       });
     }
 
@@ -187,14 +179,21 @@ router.put("/pin/:id", protect, async (req, res) => {
 
     await document.save();
 
-    await addActivity(
-      document.pinned
-        ? "Pinned Document"
-        : "Unpinned Document",
-      document.filename,
-      "pin",
-      "indigo"
-    );
+    try {
+      await addActivity(
+        document.pinned
+          ? "Pinned Document"
+          : "Unpinned Document",
+        document.filename,
+        "pin",
+        "indigo"
+      );
+    } catch (activityError) {
+      console.error(
+        "Pin Activity Error:",
+        activityError.message
+      );
+    }
 
     return res.status(200).json({
       success: true,
@@ -204,7 +203,7 @@ router.put("/pin/:id", protect, async (req, res) => {
       pinned: document.pinned,
     });
   } catch (error) {
-    console.error("Pin Document Error:", error);
+    console.error("Pin Error:", error);
 
     return res.status(500).json({
       success: false,
@@ -213,21 +212,18 @@ router.put("/pin/:id", protect, async (req, res) => {
   }
 });
 
-/* =====================================
-   DELETE DOCUMENT
-===================================== */
+/* ===========================
+   Delete Document
+=========================== */
 
-router.delete("/:id", protect, async (req, res) => {
+router.delete("/:id", async (req, res) => {
   try {
-    const document = await Document.findOne({
-      _id: req.params.id,
-      uploadedBy: req.user._id,
-    });
+    const document = await Document.findById(req.params.id);
 
     if (!document) {
       return res.status(404).json({
         success: false,
-        message: "Document not found or access denied",
+        message: "Document not found",
       });
     }
 
@@ -235,24 +231,28 @@ router.delete("/:id", protect, async (req, res) => {
       fs.unlinkSync(document.filepath);
     }
 
-    await Document.deleteOne({
-      _id: document._id,
-      uploadedBy: req.user._id,
-    });
+    await Document.findByIdAndDelete(req.params.id);
 
-    await addActivity(
-      "Deleted Document",
-      document.filename,
-      "trash",
-      "red"
-    );
+    try {
+      await addActivity(
+        "Deleted Document",
+        document.filename,
+        "trash",
+        "red"
+      );
+    } catch (activityError) {
+      console.error(
+        "Delete Activity Error:",
+        activityError.message
+      );
+    }
 
     return res.status(200).json({
       success: true,
       message: "Document deleted successfully",
     });
   } catch (error) {
-    console.error("Delete Document Error:", error);
+    console.error("Delete Error:", error);
 
     return res.status(500).json({
       success: false,
