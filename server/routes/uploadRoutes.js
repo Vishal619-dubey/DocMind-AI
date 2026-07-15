@@ -5,7 +5,6 @@ const path = require("path");
 const pdfParse = require("pdf-parse");
 
 const Document = require("../models/Document");
-const { protect } = require("../middleware/authMiddleware");
 
 const router = express.Router();
 
@@ -42,7 +41,7 @@ const storage = multer.diskStorage({
 });
 
 /* =====================================
-   Allowed Files
+   Allowed File Types
 ===================================== */
 
 const allowedTypes = [
@@ -105,10 +104,10 @@ function getFileType(mimetype = "") {
    Upload Route
 ===================================== */
 
-router.post("/", protect, (req, res) => {
+router.post("/", (req, res) => {
   upload.single("file")(req, res, async (uploadError) => {
     if (uploadError) {
-      console.error("Multer Error:", uploadError);
+      console.error("Multer Error:", uploadError.message);
 
       return res.status(400).json({
         success: false,
@@ -142,7 +141,10 @@ router.post("/", protect, (req, res) => {
         mimeType: req.file.mimetype,
         fileType,
         content: extractedContent,
-        uploadedBy: req.user._id,
+        summary: "",
+        favorite: false,
+        pinned: false,
+        uploadedBy: null,
       });
 
       return res.status(201).json({
