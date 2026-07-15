@@ -16,7 +16,7 @@ export default function AnalyticsCard() {
   const loadAnalytics = async () => {
     try {
       const res = await axios.get(
-        "http://localhost:5000/api/documents"
+        "https://docmind-ai-gmxl.onrender.com/api/documents"
       );
 
       const docs = res.data;

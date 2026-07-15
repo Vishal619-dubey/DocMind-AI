@@ -19,7 +19,7 @@ export default function ActivityPanel() {
   const loadActivities = async () => {
     try {
       const res = await axios.get(
-        "http://localhost:5000/api/activity"
+        "https://docmind-ai-gmxl.onrender.com/api/activity"
       );
 
       setActivities(res.data);

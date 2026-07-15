@@ -10,11 +10,11 @@ export default function PdfViewer({
 }) {
   if (!id) return null;
 
-  const pdfUrl = `http://localhost:5000/api/documents/view/${id}`;
+  const pdfUrl = `https://docmind-ai-gmxl.onrender.com/api/documents/view/${id}`;
 
   const downloadPdf = () => {
     window.open(
-      `http://localhost:5000/api/documents/download/${id}`,
+      `https://docmind-ai-gmxl.onrender.com/api/documents/download/${id}`,
       "_blank"
     );
   };

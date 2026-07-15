@@ -57,7 +57,7 @@ export default function UploadCard() {
       setUploaded("");
 
       await axios.post(
-        "http://localhost:5000/api/upload",
+        "https://docmind-ai-gmxl.onrender.com/api/upload",
         formData,
         {
           headers: {

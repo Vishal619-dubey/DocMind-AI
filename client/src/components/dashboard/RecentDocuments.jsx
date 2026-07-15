@@ -34,7 +34,7 @@ export default function RecentDocuments() {
   const fetchDocuments = async () => {
     try {
       const res = await axios.get(
-        "http://localhost:5000/api/documents"
+        "https://docmind-ai-gmxl.onrender.com/api/documents"
       );
 
       setDocuments(res.data);
@@ -46,7 +46,7 @@ export default function RecentDocuments() {
 
   const toggleFavorite = async (id) => {
     await axios.put(
-      `http://localhost:5000/api/documents/favorite/${id}`
+      `https://docmind-ai-gmxl.onrender.com/api/documents/favorite/${id}`
     );
 
     fetchDocuments();
@@ -54,7 +54,7 @@ export default function RecentDocuments() {
 
   const togglePin = async (id) => {
     await axios.put(
-      `http://localhost:5000/api/documents/pin/${id}`
+      `https://docmind-ai-gmxl.onrender.com/api/documents/pin/${id}`
     );
 
     fetchDocuments();
@@ -66,7 +66,7 @@ export default function RecentDocuments() {
       return;
 
     await axios.delete(
-      `http://localhost:5000/api/documents/${id}`
+      `https://docmind-ai-gmxl.onrender.com/api/documents/${id}`
     );
 
     fetchDocuments();
@@ -76,7 +76,7 @@ export default function RecentDocuments() {
   const downloadPdf = (id) => {
 
     window.open(
-      `http://localhost:5000/api/documents/download/${id}`,
+      `https://docmind-ai-gmxl.onrender.com/api/documents/download/${id}`,
       "_blank"
     );
 
@@ -89,7 +89,7 @@ export default function RecentDocuments() {
       setLoadingSummary(id);
 
       await axios.post(
-        `http://localhost:5000/api/summary/${id}`
+        `https://docmind-ai-gmxl.onrender.com/api/summary/${id}`
       );
 
       fetchDocuments();

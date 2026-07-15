@@ -20,7 +20,7 @@ export default function ChatWithPdf({ documentId }) {
 
     try {
       const res = await axios.post(
-        `http://localhost:5000/api/chat/${documentId}`,
+        `https://docmind-ai-gmxl.onrender.com/api/chat/${documentId}`,
         {
           question,
         }
