@@ -1,215 +1,278 @@
-import { useEffect, useState } from "react";
-import axios from "axios";
+const express = require("express");
+const multer = require("multer");
+const fs = require("fs");
+const path = require("path");
+const { addActivity } = require("../controllers/activityController");
 
-import {
-  FaTimes,
-  FaDownload,
-  FaExpand,
-  FaSpinner,
-} from "react-icons/fa";
+const Document = require("../models/Document");
+const extractPdfText = require("../utils/pdfExtractor");
 
-const API_URL = "https://docmind-ai-gmxl.onrender.com";
+const router = express.Router();
 
-export default function PdfViewer({
-  id,
-  token,
-  onClose,
-}) {
-  const [pdfBlobUrl, setPdfBlobUrl] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+/* ===========================
+   Multer Configuration
+=========================== */
 
-  useEffect(() => {
-    let generatedBlobUrl = "";
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, "uploads/");
+  },
 
-    const loadPdf = async () => {
-      if (!id || !token) {
-        setError("Authentication required");
-        setLoading(false);
-        return;
-      }
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + "-" + file.originalname);
+  },
+});
 
-      try {
-        setLoading(true);
-        setError("");
+const fileFilter = (req, file, cb) => {
+  if (file.mimetype === "application/pdf") {
+    cb(null, true);
+  } else {
+    cb(new Error("Only PDF files are allowed."), false);
+  }
+};
 
-        const response = await axios.get(
-          `${API_URL}/api/documents/view/${id}`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-            responseType: "blob",
-          }
-        );
+const upload = multer({
+  storage,
+  fileFilter,
+});
 
-        generatedBlobUrl = window.URL.createObjectURL(
-          new Blob([response.data], {
-            type:
-              response.headers["content-type"] ||
-              "application/pdf",
-          })
-        );
+/* ===========================
+   Upload PDF
+=========================== */
 
-        setPdfBlobUrl(generatedBlobUrl);
-      } catch (err) {
-        console.error("PDF Preview Error:", err);
-
-        setError(
-          err.response?.data?.message ||
-            "Unable to preview this document"
-        );
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadPdf();
-
-    return () => {
-      if (generatedBlobUrl) {
-        window.URL.revokeObjectURL(generatedBlobUrl);
-      }
-    };
-  }, [id, token]);
-
-  if (!id) return null;
-
-  const downloadPdf = async () => {
-    try {
-      const response = await axios.get(
-        `${API_URL}/api/documents/download/${id}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          responseType: "blob",
-        }
-      );
-
-      const blobUrl = window.URL.createObjectURL(
-        new Blob([response.data])
-      );
-
-      const link = document.createElement("a");
-
-      link.href = blobUrl;
-      link.setAttribute("download", "document.pdf");
-
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-
-      window.URL.revokeObjectURL(blobUrl);
-    } catch (err) {
-      console.error("PDF Download Error:", err);
-
-      alert(
-        err.response?.data?.message ||
-          "Unable to download document"
-      );
+router.post("/", upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "No PDF uploaded",
+      });
     }
-  };
 
-  const openFullscreen = () => {
-    if (!pdfBlobUrl) return;
+    // Extract PDF Text
+    const extractedText = await extractPdfText(req.file.path);
 
-    window.open(pdfBlobUrl, "_blank");
-  };
+    // Save Document
+    const document = await Document.create({
+      filename: req.file.originalname,
+      filepath: req.file.path,
+      filesize: req.file.size,
+      uploadedBy: null,
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm sm:p-8">
-      <div className="flex h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
-        {/* Header */}
+      content: extractedText,
+      summary: "",
 
-        <div className="flex min-h-16 items-center justify-between gap-4 border-b border-slate-700 px-4 py-3 sm:px-6">
-          <div>
-            <h2 className="text-xl font-bold">
-              PDF Preview
-            </h2>
+      favorite: false,
+      pinned: false,
+    });
 
-            <p className="text-sm text-gray-400">
-              View your uploaded document
-            </p>
-          </div>
+    res.status(201).json({
+      success: true,
+      message: "PDF Uploaded Successfully",
+      document,
+    });
 
-          <div className="flex items-center gap-2 sm:gap-3">
-            <button
-              type="button"
-              onClick={downloadPdf}
-              disabled={loading || !pdfBlobUrl}
-              className="flex items-center gap-2 rounded-xl bg-indigo-600 px-3 py-2 transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50 sm:px-4"
-            >
-              <FaDownload />
+  } catch (err) {
+    console.log(err);
 
-              <span className="hidden sm:inline">
-                Download
-              </span>
-            </button>
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+});
 
-            <button
-              type="button"
-              onClick={openFullscreen}
-              disabled={loading || !pdfBlobUrl}
-              title="Open in new tab"
-              className="rounded-xl bg-slate-700 p-3 transition hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <FaExpand />
-            </button>
+/* ===========================
+   Get All Documents
+=========================== */
 
-            <button
-              type="button"
-              onClick={onClose}
-              title="Close preview"
-              className="rounded-xl bg-red-600 p-3 transition hover:bg-red-500"
-            >
-              <FaTimes />
-            </button>
-          </div>
-        </div>
+router.get("/", async (req, res) => {
+  try {
+    const documents = await Document.find().sort({
+      createdAt: -1,
+    });
 
-        {/* Viewer */}
+    res.json(documents);
 
-        <div className="relative flex-1 bg-slate-950">
-          {loading && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <FaSpinner className="animate-spin text-4xl text-indigo-500" />
+  } catch (err) {
+    console.log(err);
 
-              <p className="mt-4 text-slate-400">
-                Loading PDF...
-              </p>
-            </div>
-          )}
+    res.status(500).json({
+      message: err.message,
+    });
+  }
+});
 
-          {!loading && error && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center">
-              <h3 className="text-xl font-semibold text-red-400">
-                Preview Failed
-              </h3>
+/* ===========================
+   Preview PDF
+=========================== */
 
-              <p className="mt-2 max-w-lg text-slate-400">
-                {error}
-              </p>
+router.get("/view/:id", async (req, res) => {
+  try {
 
-              <button
-                type="button"
-                onClick={onClose}
-                className="mt-6 rounded-xl bg-slate-800 px-5 py-3 transition hover:bg-slate-700"
-              >
-                Close
-              </button>
-            </div>
-          )}
+    const document = await Document.findById(req.params.id);
 
-          {!loading && !error && pdfBlobUrl && (
-            <iframe
-              src={pdfBlobUrl}
-              title="PDF Preview"
-              className="h-full w-full bg-white"
-            />
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
+    if (!document) {
+      return res.status(404).json({
+        message: "Document not found",
+      });
+    }
+
+    document.views += 1;
+    document.lastOpened = new Date();
+
+    await document.save();
+
+    res.sendFile(
+      path.resolve(document.filepath)
+    );
+
+  } catch (err) {
+
+    console.log(err);
+
+    res.status(500).json({
+      message: err.message,
+    });
+  }
+});
+
+/* ===========================
+   Download PDF
+=========================== */
+
+router.get("/download/:id", async (req, res) => {
+  try {
+
+    const document = await Document.findById(req.params.id);
+
+    if (!document) {
+      return res.status(404).json({
+        message: "Document not found",
+      });
+    }
+
+    document.downloads += 1;
+
+    await document.save();
+
+    res.download(
+      path.resolve(document.filepath),
+      document.filename
+    );
+
+  } catch (err) {
+
+    console.log(err);
+
+    res.status(500).json({
+      message: err.message,
+    });
+  }
+});
+
+/* ===========================
+   Favorite
+=========================== */
+
+router.put("/favorite/:id", async (req, res) => {
+  try {
+
+    const document = await Document.findById(req.params.id);
+
+    if (!document) {
+      return res.status(404).json({
+        message: "Document not found",
+      });
+    }
+
+    document.favorite = !document.favorite;
+
+    await document.save();
+
+    res.json({
+      success: true,
+      favorite: document.favorite,
+    });
+
+  } catch (err) {
+
+    console.log(err);
+
+    res.status(500).json({
+      message: err.message,
+    });
+  }
+});
+
+/* ===========================
+   Pin
+=========================== */
+
+router.put("/pin/:id", async (req, res) => {
+  try {
+
+    const document = await Document.findById(req.params.id);
+
+    if (!document) {
+      return res.status(404).json({
+        message: "Document not found",
+      });
+    }
+
+    document.pinned = !document.pinned;
+
+    await document.save();
+
+    res.json({
+      success: true,
+      pinned: document.pinned,
+    });
+
+  } catch (err) {
+
+    console.log(err);
+
+    res.status(500).json({
+      message: err.message,
+    });
+  }
+});
+
+/* ===========================
+   Delete PDF
+=========================== */
+
+router.delete("/:id", async (req, res) => {
+  try {
+
+    const document = await Document.findById(req.params.id);
+
+    if (!document) {
+      return res.status(404).json({
+        message: "Document not found",
+      });
+    }
+
+    if (fs.existsSync(document.filepath)) {
+      fs.unlinkSync(document.filepath);
+    }
+
+    await Document.findByIdAndDelete(req.params.id);
+
+    res.json({
+      success: true,
+      message: "PDF Deleted Successfully",
+    });
+
+  } catch (err) {
+
+    console.log(err);
+
+    res.status(500).json({
+      message: err.message,
+    });
+  }
+});
+
+module.exports = router;
