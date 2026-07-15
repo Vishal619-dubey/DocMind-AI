@@ -2,328 +2,214 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 
 import {
-  Search,
-  FolderOpen,
-  Upload,
-  ChevronDown,
-} from "lucide-react";
+  FaTimes,
+  FaDownload,
+  FaExpand,
+  FaSpinner,
+} from "react-icons/fa";
 
-import ChatWithPdf from "./ChatWithPdf";
-import DocumentCard from "./DocumentCard";
-import PdfViewer from "./PdfViewer";
+const API_URL = "https://docmind-ai-gmxl.onrender.com";
 
-export default function RecentDocuments() {
-
-  const [documents, setDocuments] = useState([]);
-
-  const [previewId, setPreviewId] = useState(null);
-
-  const [search, setSearch] = useState("");
-
-  const [filter, setFilter] = useState("All");
-
-  const [sort, setSort] = useState("Recent");
-
-  const [loadingSummary, setLoadingSummary] =
-    useState(null);
+export default function PdfViewer({
+  id,
+  token,
+  onClose,
+}) {
+  const [pdfBlobUrl, setPdfBlobUrl] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    fetchDocuments();
-  }, []);
+    let generatedBlobUrl = "";
 
-  const fetchDocuments = async () => {
+    const loadPdf = async () => {
+      if (!id || !token) {
+        setError("Authentication required");
+        setLoading(false);
+        return;
+      }
+
+      try {
+        setLoading(true);
+        setError("");
+
+        const response = await axios.get(
+          `${API_URL}/api/documents/view/${id}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+            responseType: "blob",
+          }
+        );
+
+        generatedBlobUrl = window.URL.createObjectURL(
+          new Blob([response.data], {
+            type:
+              response.headers["content-type"] ||
+              "application/pdf",
+          })
+        );
+
+        setPdfBlobUrl(generatedBlobUrl);
+      } catch (err) {
+        console.error("PDF Preview Error:", err);
+
+        setError(
+          err.response?.data?.message ||
+            "Unable to preview this document"
+        );
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadPdf();
+
+    return () => {
+      if (generatedBlobUrl) {
+        window.URL.revokeObjectURL(generatedBlobUrl);
+      }
+    };
+  }, [id, token]);
+
+  if (!id) return null;
+
+  const downloadPdf = async () => {
     try {
-      const res = await axios.get(
-        "https://docmind-ai-gmxl.onrender.com/api/documents"
+      const response = await axios.get(
+        `${API_URL}/api/documents/download/${id}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          responseType: "blob",
+        }
       );
 
-      setDocuments(res.data);
+      const blobUrl = window.URL.createObjectURL(
+        new Blob([response.data])
+      );
 
+      const link = document.createElement("a");
+
+      link.href = blobUrl;
+      link.setAttribute("download", "document.pdf");
+
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      window.URL.revokeObjectURL(blobUrl);
     } catch (err) {
-      console.log(err);
-    }
-  };
+      console.error("PDF Download Error:", err);
 
-  const toggleFavorite = async (id) => {
-    await axios.put(
-      `https://docmind-ai-gmxl.onrender.com/api/documents/favorite/${id}`
-    );
-
-    fetchDocuments();
-  };
-
-  const togglePin = async (id) => {
-    await axios.put(
-      `https://docmind-ai-gmxl.onrender.com/api/documents/pin/${id}`
-    );
-
-    fetchDocuments();
-  };
-
-  const deleteDocument = async (id) => {
-
-    if (!window.confirm("Delete document?"))
-      return;
-
-    await axios.delete(
-      `https://docmind-ai-gmxl.onrender.com/api/documents/${id}`
-    );
-
-    fetchDocuments();
-
-  };
-
-  const downloadPdf = (id) => {
-
-    window.open(
-      `https://docmind-ai-gmxl.onrender.com/api/documents/download/${id}`,
-      "_blank"
-    );
-
-  };
-
-  const generateSummary = async (id) => {
-
-    try {
-
-      setLoadingSummary(id);
-
-      await axios.post(
-        `https://docmind-ai-gmxl.onrender.com/api/summary/${id}`
+      alert(
+        err.response?.data?.message ||
+          "Unable to download document"
       );
-
-      fetchDocuments();
-
-    } catch {
-
-      alert("Summary Failed");
-
     }
-
-    setLoadingSummary(null);
-
   };
 
-  let filtered = documents.filter((doc) =>
-    doc.filename
-      .toLowerCase()
-      .includes(search.toLowerCase())
-  );
+  const openFullscreen = () => {
+    if (!pdfBlobUrl) return;
 
-  if (filter !== "All") {
-
-    filtered = filtered.filter(
-      (doc) =>
-        doc.fileType.toLowerCase() ===
-        filter.toLowerCase()
-    );
-
-  }
-
-  if (sort === "A-Z") {
-
-    filtered.sort((a, b) =>
-      a.filename.localeCompare(b.filename)
-    );
-
-  }
-
-  if (sort === "Recent") {
-
-    filtered.sort(
-      (a, b) =>
-        new Date(b.createdAt) -
-        new Date(a.createdAt)
-    );
-
-  }
+    window.open(pdfBlobUrl, "_blank");
+  };
 
   return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm sm:p-8">
+      <div className="flex h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
+        {/* Header */}
 
-    <div className="rounded-3xl border border-slate-800 bg-slate-900 p-7">
+        <div className="flex min-h-16 items-center justify-between gap-4 border-b border-slate-700 px-4 py-3 sm:px-6">
+          <div>
+            <h2 className="text-xl font-bold">
+              PDF Preview
+            </h2>
 
-      {/* Header */}
-
-      <div className="flex items-center justify-between">
-
-        <div>
-
-          <h2 className="text-3xl font-bold">
-
-            Documents
-
-          </h2>
-
-          <p className="text-slate-400 mt-2">
-
-            Manage all your AI documents
-
-          </p>
-
-        </div>
-
-        <button className="rounded-2xl bg-indigo-600 px-5 py-3 flex items-center gap-2 hover:bg-indigo-500 transition">
-
-          <Upload size={18} />
-
-          Upload
-
-        </button>
-
-      </div>
-
-      {/* Toolbar */}
-
-      <div className="mt-8 flex items-center gap-4 flex-wrap">
-
-        <div className="relative flex-1 min-w-[280px]">
-
-          <Search
-            size={18}
-            className="absolute left-4 top-4 text-slate-500"
-          />
-
-          <input
-            value={search}
-            onChange={(e) =>
-              setSearch(e.target.value)
-            }
-            placeholder="Search documents..."
-            className="w-full rounded-2xl border border-slate-800 bg-slate-950 py-3 pl-12 pr-4 outline-none focus:border-indigo-500 transition"
-          />
-
-        </div>
-
-        <div className="relative">
-
-          <select
-            value={filter}
-            onChange={(e) =>
-              setFilter(e.target.value)
-            }
-            className="appearance-none rounded-2xl border border-slate-800 bg-slate-950 px-5 py-3 pr-10 outline-none"
-          >
-
-            <option>All</option>
-
-            <option>PDF</option>
-
-            <option>Image</option>
-
-            <option>Audio</option>
-
-            <option>Video</option>
-
-            <option>DOCX</option>
-
-          </select>
-
-          <ChevronDown
-            size={18}
-            className="absolute right-3 top-4 text-slate-500 pointer-events-none"
-          />
-
-        </div>
-
-        <div className="relative">
-
-          <select
-            value={sort}
-            onChange={(e) =>
-              setSort(e.target.value)
-            }
-            className="appearance-none rounded-2xl border border-slate-800 bg-slate-950 px-5 py-3 pr-10 outline-none"
-          >
-
-            <option>Recent</option>
-
-            <option>A-Z</option>
-
-          </select>
-
-          <ChevronDown
-            size={18}
-            className="absolute right-3 top-4 text-slate-500 pointer-events-none"
-          />
-
-        </div>
-
-      </div>
-
-      <div className="mt-8 space-y-5">
-
-  {filtered.length === 0 ? (
-
-    <div className="rounded-3xl border border-dashed border-slate-700 py-20 text-center">
-
-      <FolderOpen
-        size={60}
-        className="mx-auto text-slate-600"
-      />
-
-      <h3 className="mt-6 text-2xl font-bold">
-        No Documents Found
-      </h3>
-
-      <p className="mt-2 text-slate-400">
-        Upload your first document to get started.
-      </p>
-
-    </div>
-
-  ) : (
-
-    filtered.map((doc) => (
-
-      <DocumentCard
-        key={doc._id}
-        doc={doc}
-        onFavorite={toggleFavorite}
-        onPin={togglePin}
-        onPreview={setPreviewId}
-        onDownload={downloadPdf}
-        onDelete={deleteDocument}
-        onSummary={generateSummary}
-      >
-
-        {loadingSummary === doc._id && (
-
-          <div className="mt-4 rounded-xl bg-indigo-500/10 border border-indigo-500/30 p-4">
-
-            <p className="animate-pulse text-indigo-400">
-              🤖 AI is generating summary...
+            <p className="text-sm text-gray-400">
+              View your uploaded document
             </p>
-
           </div>
 
-        )}
+          <div className="flex items-center gap-2 sm:gap-3">
+            <button
+              type="button"
+              onClick={downloadPdf}
+              disabled={loading || !pdfBlobUrl}
+              className="flex items-center gap-2 rounded-xl bg-indigo-600 px-3 py-2 transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50 sm:px-4"
+            >
+              <FaDownload />
 
-        {doc.summary && (
+              <span className="hidden sm:inline">
+                Download
+              </span>
+            </button>
 
-          <div className="mt-5">
-            <ChatWithPdf documentId={doc._id} />
+            <button
+              type="button"
+              onClick={openFullscreen}
+              disabled={loading || !pdfBlobUrl}
+              title="Open in new tab"
+              className="rounded-xl bg-slate-700 p-3 transition hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <FaExpand />
+            </button>
+
+            <button
+              type="button"
+              onClick={onClose}
+              title="Close preview"
+              className="rounded-xl bg-red-600 p-3 transition hover:bg-red-500"
+            >
+              <FaTimes />
+            </button>
           </div>
+        </div>
 
-        )}
+        {/* Viewer */}
 
-      </DocumentCard>
+        <div className="relative flex-1 bg-slate-950">
+          {loading && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <FaSpinner className="animate-spin text-4xl text-indigo-500" />
 
-    ))
+              <p className="mt-4 text-slate-400">
+                Loading PDF...
+              </p>
+            </div>
+          )}
 
-  )}
+          {!loading && error && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center">
+              <h3 className="text-xl font-semibold text-red-400">
+                Preview Failed
+              </h3>
 
-</div>
-      {previewId && (
-        <PdfViewer
-          id={previewId}
-          onClose={() => setPreviewId(null)}
-        />
-      )}
+              <p className="mt-2 max-w-lg text-slate-400">
+                {error}
+              </p>
 
+              <button
+                type="button"
+                onClick={onClose}
+                className="mt-6 rounded-xl bg-slate-800 px-5 py-3 transition hover:bg-slate-700"
+              >
+                Close
+              </button>
+            </div>
+          )}
+
+          {!loading && !error && pdfBlobUrl && (
+            <iframe
+              src={pdfBlobUrl}
+              title="PDF Preview"
+              className="h-full w-full bg-white"
+            />
+          )}
+        </div>
+      </div>
     </div>
-
   );
-
 }
-      
-      

@@ -1,188 +1,137 @@
 const express = require("express");
-const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
-const { addActivity } = require("../controllers/activityController");
 
 const Document = require("../models/Document");
-const extractPdfText = require("../utils/pdfExtractor");
+const { protect } = require("../middleware/authMiddleware");
+const { addActivity } = require("../controllers/activityController");
 
 const router = express.Router();
 
-/* ===========================
-   Multer Configuration
-=========================== */
+/* =====================================
+   GET LOGGED-IN USER DOCUMENTS
+===================================== */
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "uploads/");
-  },
-
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + "-" + file.originalname);
-  },
-});
-
-const fileFilter = (req, file, cb) => {
-  if (file.mimetype === "application/pdf") {
-    cb(null, true);
-  } else {
-    cb(new Error("Only PDF files are allowed."), false);
-  }
-};
-
-const upload = multer({
-  storage,
-  fileFilter,
-});
-
-/* ===========================
-   Upload PDF
-=========================== */
-
-router.post("/", upload.single("file"), async (req, res) => {
+router.get("/", protect, async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        message: "No PDF uploaded",
-      });
-    }
-
-    // Extract PDF Text
-    const extractedText = await extractPdfText(req.file.path);
-
-    // Save Document
-    const document = await Document.create({
-      filename: req.file.originalname,
-      filepath: req.file.path,
-      filesize: req.file.size,
-      uploadedBy: null,
-
-      content: extractedText,
-      summary: "",
-
-      favorite: false,
-      pinned: false,
-    });
-
-    res.status(201).json({
-      success: true,
-      message: "PDF Uploaded Successfully",
-      document,
-    });
-
-  } catch (err) {
-    console.log(err);
-
-    res.status(500).json({
-      success: false,
-      message: err.message,
-    });
-  }
-});
-
-/* ===========================
-   Get All Documents
-=========================== */
-
-router.get("/", async (req, res) => {
-  try {
-    const documents = await Document.find().sort({
+    const documents = await Document.find({
+      uploadedBy: req.user._id,
+    }).sort({
       createdAt: -1,
     });
 
-    res.json(documents);
+    return res.status(200).json(documents);
+  } catch (error) {
+    console.error("Get Documents Error:", error);
 
-  } catch (err) {
-    console.log(err);
-
-    res.status(500).json({
-      message: err.message,
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Unable to fetch documents",
     });
   }
 });
 
-/* ===========================
-   Preview PDF
-=========================== */
+/* =====================================
+   PREVIEW DOCUMENT
+===================================== */
 
-router.get("/view/:id", async (req, res) => {
+router.get("/view/:id", protect, async (req, res) => {
   try {
-
-    const document = await Document.findById(req.params.id);
+    const document = await Document.findOne({
+      _id: req.params.id,
+      uploadedBy: req.user._id,
+    });
 
     if (!document) {
       return res.status(404).json({
-        message: "Document not found",
+        success: false,
+        message: "Document not found or access denied",
       });
     }
 
-    document.views += 1;
+    if (!document.filepath || !fs.existsSync(document.filepath)) {
+      return res.status(410).json({
+        success: false,
+        message:
+          "Document file is no longer available. Please upload it again.",
+      });
+    }
+
+    document.views = (document.views || 0) + 1;
     document.lastOpened = new Date();
 
     await document.save();
 
-    res.sendFile(
-      path.resolve(document.filepath)
-    );
+    return res.sendFile(path.resolve(document.filepath));
+  } catch (error) {
+    console.error("Preview Document Error:", error);
 
-  } catch (err) {
-
-    console.log(err);
-
-    res.status(500).json({
-      message: err.message,
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Unable to preview document",
     });
   }
 });
 
-/* ===========================
-   Download PDF
-=========================== */
+/* =====================================
+   DOWNLOAD DOCUMENT
+===================================== */
 
-router.get("/download/:id", async (req, res) => {
+router.get("/download/:id", protect, async (req, res) => {
   try {
-
-    const document = await Document.findById(req.params.id);
+    const document = await Document.findOne({
+      _id: req.params.id,
+      uploadedBy: req.user._id,
+    });
 
     if (!document) {
       return res.status(404).json({
-        message: "Document not found",
+        success: false,
+        message: "Document not found or access denied",
       });
     }
 
-    document.downloads += 1;
+    if (!document.filepath || !fs.existsSync(document.filepath)) {
+      return res.status(410).json({
+        success: false,
+        message:
+          "Document file is no longer available. Please upload it again.",
+      });
+    }
+
+    document.downloads = (document.downloads || 0) + 1;
 
     await document.save();
 
-    res.download(
+    return res.download(
       path.resolve(document.filepath),
       document.filename
     );
+  } catch (error) {
+    console.error("Download Document Error:", error);
 
-  } catch (err) {
-
-    console.log(err);
-
-    res.status(500).json({
-      message: err.message,
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Unable to download document",
     });
   }
 });
 
-/* ===========================
-   Favorite
-=========================== */
+/* =====================================
+   TOGGLE FAVORITE
+===================================== */
 
-router.put("/favorite/:id", async (req, res) => {
+router.put("/favorite/:id", protect, async (req, res) => {
   try {
-
-    const document = await Document.findById(req.params.id);
+    const document = await Document.findOne({
+      _id: req.params.id,
+      uploadedBy: req.user._id,
+    });
 
     if (!document) {
       return res.status(404).json({
-        message: "Document not found",
+        success: false,
+        message: "Document not found or access denied",
       });
     }
 
@@ -190,33 +139,47 @@ router.put("/favorite/:id", async (req, res) => {
 
     await document.save();
 
-    res.json({
+    await addActivity(
+      document.favorite
+        ? "Added to Favorites"
+        : "Removed from Favorites",
+      document.filename,
+      "star",
+      "yellow"
+    );
+
+    return res.status(200).json({
       success: true,
+      message: document.favorite
+        ? "Added to favorites"
+        : "Removed from favorites",
       favorite: document.favorite,
     });
+  } catch (error) {
+    console.error("Favorite Document Error:", error);
 
-  } catch (err) {
-
-    console.log(err);
-
-    res.status(500).json({
-      message: err.message,
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Unable to update favorite",
     });
   }
 });
 
-/* ===========================
-   Pin
-=========================== */
+/* =====================================
+   TOGGLE PIN
+===================================== */
 
-router.put("/pin/:id", async (req, res) => {
+router.put("/pin/:id", protect, async (req, res) => {
   try {
-
-    const document = await Document.findById(req.params.id);
+    const document = await Document.findOne({
+      _id: req.params.id,
+      uploadedBy: req.user._id,
+    });
 
     if (!document) {
       return res.status(404).json({
-        message: "Document not found",
+        success: false,
+        message: "Document not found or access denied",
       });
     }
 
@@ -224,53 +187,76 @@ router.put("/pin/:id", async (req, res) => {
 
     await document.save();
 
-    res.json({
+    await addActivity(
+      document.pinned
+        ? "Pinned Document"
+        : "Unpinned Document",
+      document.filename,
+      "pin",
+      "indigo"
+    );
+
+    return res.status(200).json({
       success: true,
+      message: document.pinned
+        ? "Document pinned"
+        : "Document unpinned",
       pinned: document.pinned,
     });
+  } catch (error) {
+    console.error("Pin Document Error:", error);
 
-  } catch (err) {
-
-    console.log(err);
-
-    res.status(500).json({
-      message: err.message,
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Unable to update pin",
     });
   }
 });
 
-/* ===========================
-   Delete PDF
-=========================== */
+/* =====================================
+   DELETE DOCUMENT
+===================================== */
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", protect, async (req, res) => {
   try {
-
-    const document = await Document.findById(req.params.id);
+    const document = await Document.findOne({
+      _id: req.params.id,
+      uploadedBy: req.user._id,
+    });
 
     if (!document) {
       return res.status(404).json({
-        message: "Document not found",
+        success: false,
+        message: "Document not found or access denied",
       });
     }
 
-    if (fs.existsSync(document.filepath)) {
+    if (document.filepath && fs.existsSync(document.filepath)) {
       fs.unlinkSync(document.filepath);
     }
 
-    await Document.findByIdAndDelete(req.params.id);
-
-    res.json({
-      success: true,
-      message: "PDF Deleted Successfully",
+    await Document.deleteOne({
+      _id: document._id,
+      uploadedBy: req.user._id,
     });
 
-  } catch (err) {
+    await addActivity(
+      "Deleted Document",
+      document.filename,
+      "trash",
+      "red"
+    );
 
-    console.log(err);
+    return res.status(200).json({
+      success: true,
+      message: "Document deleted successfully",
+    });
+  } catch (error) {
+    console.error("Delete Document Error:", error);
 
-    res.status(500).json({
-      message: err.message,
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Unable to delete document",
     });
   }
 });
