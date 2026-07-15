@@ -1,278 +1,378 @@
-const express = require("express");
-const multer = require("multer");
-const fs = require("fs");
-const path = require("path");
-const { addActivity } = require("../controllers/activityController");
+import { useEffect, useMemo, useState } from "react";
+import axios from "axios";
 
-const Document = require("../models/Document");
-const extractPdfText = require("../utils/pdfExtractor");
+import {
+  Search,
+  FolderOpen,
+  Upload,
+  ChevronDown,
+} from "lucide-react";
 
-const router = express.Router();
+import ChatWithPdf from "./ChatWithPdf";
+import DocumentCard from "./DocumentCard";
+import PdfViewer from "./PdfViewer";
 
-/* ===========================
-   Multer Configuration
-=========================== */
+const API_URL = "https://docmind-ai-gmxl.onrender.com";
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "uploads/");
-  },
+export default function RecentDocuments() {
+  const [documents, setDocuments] = useState([]);
+  const [previewId, setPreviewId] = useState(null);
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("All");
+  const [sort, setSort] = useState("Recent");
+  const [loading, setLoading] = useState(true);
+  const [loadingSummary, setLoadingSummary] = useState(null);
 
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + "-" + file.originalname);
-  },
-});
+  const fetchDocuments = async () => {
+    try {
+      setLoading(true);
 
-const fileFilter = (req, file, cb) => {
-  if (file.mimetype === "application/pdf") {
-    cb(null, true);
-  } else {
-    cb(new Error("Only PDF files are allowed."), false);
-  }
-};
+      const response = await axios.get(
+        `${API_URL}/api/documents`
+      );
 
-const upload = multer({
-  storage,
-  fileFilter,
-});
-
-/* ===========================
-   Upload PDF
-=========================== */
-
-router.post("/", upload.single("file"), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        message: "No PDF uploaded",
-      });
+      setDocuments(
+        Array.isArray(response.data)
+          ? response.data
+          : []
+      );
+    } catch (error) {
+      console.error(
+        "Fetch Documents Error:",
+        error
+      );
+    } finally {
+      setLoading(false);
     }
+  };
 
-    // Extract PDF Text
-    const extractedText = await extractPdfText(req.file.path);
+  useEffect(() => {
+    fetchDocuments();
 
-    // Save Document
-    const document = await Document.create({
-      filename: req.file.originalname,
-      filepath: req.file.path,
-      filesize: req.file.size,
-      uploadedBy: null,
+    const refreshDocuments = () => {
+      fetchDocuments();
+    };
 
-      content: extractedText,
-      summary: "",
-
-      favorite: false,
-      pinned: false,
-    });
-
-    res.status(201).json({
-      success: true,
-      message: "PDF Uploaded Successfully",
-      document,
-    });
-
-  } catch (err) {
-    console.log(err);
-
-    res.status(500).json({
-      success: false,
-      message: err.message,
-    });
-  }
-});
-
-/* ===========================
-   Get All Documents
-=========================== */
-
-router.get("/", async (req, res) => {
-  try {
-    const documents = await Document.find().sort({
-      createdAt: -1,
-    });
-
-    res.json(documents);
-
-  } catch (err) {
-    console.log(err);
-
-    res.status(500).json({
-      message: err.message,
-    });
-  }
-});
-
-/* ===========================
-   Preview PDF
-=========================== */
-
-router.get("/view/:id", async (req, res) => {
-  try {
-
-    const document = await Document.findById(req.params.id);
-
-    if (!document) {
-      return res.status(404).json({
-        message: "Document not found",
-      });
-    }
-
-    document.views += 1;
-    document.lastOpened = new Date();
-
-    await document.save();
-
-    res.sendFile(
-      path.resolve(document.filepath)
+    window.addEventListener(
+      "documentUploaded",
+      refreshDocuments
     );
 
-  } catch (err) {
+    return () => {
+      window.removeEventListener(
+        "documentUploaded",
+        refreshDocuments
+      );
+    };
+  }, []);
 
-    console.log(err);
+  const toggleFavorite = async (id) => {
+    try {
+      await axios.put(
+        `${API_URL}/api/documents/favorite/${id}`
+      );
 
-    res.status(500).json({
-      message: err.message,
-    });
-  }
-});
+      await fetchDocuments();
+    } catch (error) {
+      console.error("Favorite Error:", error);
 
-/* ===========================
-   Download PDF
-=========================== */
-
-router.get("/download/:id", async (req, res) => {
-  try {
-
-    const document = await Document.findById(req.params.id);
-
-    if (!document) {
-      return res.status(404).json({
-        message: "Document not found",
-      });
+      alert(
+        error.response?.data?.message ||
+          "Unable to update favorite"
+      );
     }
+  };
 
-    document.downloads += 1;
+  const togglePin = async (id) => {
+    try {
+      await axios.put(
+        `${API_URL}/api/documents/pin/${id}`
+      );
 
-    await document.save();
+      await fetchDocuments();
+    } catch (error) {
+      console.error("Pin Error:", error);
 
-    res.download(
-      path.resolve(document.filepath),
-      document.filename
+      alert(
+        error.response?.data?.message ||
+          "Unable to update pin"
+      );
+    }
+  };
+
+  const deleteDocument = async (id) => {
+    const confirmed = window.confirm(
+      "Are you sure you want to delete this document?"
     );
 
-  } catch (err) {
+    if (!confirmed) return;
 
-    console.log(err);
+    try {
+      await axios.delete(
+        `${API_URL}/api/documents/${id}`
+      );
 
-    res.status(500).json({
-      message: err.message,
-    });
-  }
-});
+      if (previewId === id) {
+        setPreviewId(null);
+      }
 
-/* ===========================
-   Favorite
-=========================== */
+      await fetchDocuments();
+    } catch (error) {
+      console.error("Delete Error:", error);
 
-router.put("/favorite/:id", async (req, res) => {
-  try {
+      alert(
+        error.response?.data?.message ||
+          "Unable to delete document"
+      );
+    }
+  };
 
-    const document = await Document.findById(req.params.id);
+  const downloadDocument = (id) => {
+    window.open(
+      `${API_URL}/api/documents/download/${id}`,
+      "_blank"
+    );
+  };
 
-    if (!document) {
-      return res.status(404).json({
-        message: "Document not found",
+  const generateSummary = async (id) => {
+    try {
+      setLoadingSummary(id);
+
+      await axios.post(
+        `${API_URL}/api/summary/${id}`
+      );
+
+      await fetchDocuments();
+    } catch (error) {
+      console.error("Summary Error:", error);
+
+      alert(
+        error.response?.data?.message ||
+          "Summary generation failed"
+      );
+    } finally {
+      setLoadingSummary(null);
+    }
+  };
+
+  const filteredDocuments = useMemo(() => {
+    let result = [...documents];
+
+    const normalizedSearch = search
+      .trim()
+      .toLowerCase();
+
+    if (normalizedSearch) {
+      result = result.filter((document) =>
+        (document.filename || "")
+          .toLowerCase()
+          .includes(normalizedSearch)
+      );
+    }
+
+    if (filter !== "All") {
+      result = result.filter(
+        (document) =>
+          (
+            document.fileType || ""
+          ).toLowerCase() ===
+          filter.toLowerCase()
+      );
+    }
+
+    if (sort === "A-Z") {
+      result.sort((a, b) =>
+        (a.filename || "").localeCompare(
+          b.filename || ""
+        )
+      );
+    }
+
+    if (sort === "Recent") {
+      result.sort(
+        (a, b) =>
+          new Date(b.createdAt || 0) -
+          new Date(a.createdAt || 0)
+      );
+    }
+
+    return result;
+  }, [documents, search, filter, sort]);
+
+  const scrollToUpload = () => {
+    const uploadSection =
+      document.getElementById(
+        "upload-section"
+      );
+
+    if (uploadSection) {
+      uploadSection.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
       });
     }
+  };
 
-    document.favorite = !document.favorite;
+  return (
+    <div className="rounded-3xl border border-slate-800 bg-slate-900 p-7">
+      {/* Header */}
 
-    await document.save();
+      <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-3xl font-bold">
+            Documents
+          </h2>
 
-    res.json({
-      success: true,
-      favorite: document.favorite,
-    });
+          <p className="mt-2 text-slate-400">
+            Manage all your AI documents
+          </p>
+        </div>
 
-  } catch (err) {
+        <button
+          type="button"
+          onClick={scrollToUpload}
+          className="flex items-center justify-center gap-2 rounded-2xl bg-indigo-600 px-5 py-3 transition hover:bg-indigo-500"
+        >
+          <Upload size={18} />
+          Upload
+        </button>
+      </div>
 
-    console.log(err);
+      {/* Toolbar */}
 
-    res.status(500).json({
-      message: err.message,
-    });
-  }
-});
+      <div className="mt-8 flex flex-wrap items-center gap-4">
+        <div className="relative min-w-[260px] flex-1">
+          <Search
+            size={18}
+            className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"
+          />
 
-/* ===========================
-   Pin
-=========================== */
+          <input
+            type="text"
+            value={search}
+            onChange={(event) =>
+              setSearch(event.target.value)
+            }
+            placeholder="Search documents..."
+            className="w-full rounded-2xl border border-slate-800 bg-slate-950 py-3 pl-12 pr-4 outline-none transition focus:border-indigo-500"
+          />
+        </div>
 
-router.put("/pin/:id", async (req, res) => {
-  try {
+        <div className="relative">
+          <select
+            value={filter}
+            onChange={(event) =>
+              setFilter(event.target.value)
+            }
+            className="appearance-none rounded-2xl border border-slate-800 bg-slate-950 px-5 py-3 pr-10 outline-none"
+          >
+            <option>All</option>
+            <option>PDF</option>
+            <option>Image</option>
+            <option>Audio</option>
+            <option>Video</option>
+            <option>DOCX</option>
+            <option>XLSX</option>
+            <option>PPTX</option>
+            <option>TXT</option>
+          </select>
 
-    const document = await Document.findById(req.params.id);
+          <ChevronDown
+            size={18}
+            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-500"
+          />
+        </div>
 
-    if (!document) {
-      return res.status(404).json({
-        message: "Document not found",
-      });
-    }
+        <div className="relative">
+          <select
+            value={sort}
+            onChange={(event) =>
+              setSort(event.target.value)
+            }
+            className="appearance-none rounded-2xl border border-slate-800 bg-slate-950 px-5 py-3 pr-10 outline-none"
+          >
+            <option>Recent</option>
+            <option>A-Z</option>
+          </select>
 
-    document.pinned = !document.pinned;
+          <ChevronDown
+            size={18}
+            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-500"
+          />
+        </div>
+      </div>
 
-    await document.save();
+      {/* Documents */}
 
-    res.json({
-      success: true,
-      pinned: document.pinned,
-    });
+      <div className="mt-8 space-y-5">
+        {loading ? (
+          <div className="rounded-3xl border border-slate-800 bg-slate-950/40 py-20 text-center">
+            <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-slate-700 border-t-indigo-500" />
 
-  } catch (err) {
+            <p className="mt-5 text-slate-400">
+              Loading documents...
+            </p>
+          </div>
+        ) : filteredDocuments.length === 0 ? (
+          <div className="rounded-3xl border border-dashed border-slate-700 py-20 text-center">
+            <FolderOpen
+              size={60}
+              className="mx-auto text-slate-600"
+            />
 
-    console.log(err);
+            <h3 className="mt-6 text-2xl font-bold">
+              No Documents Found
+            </h3>
 
-    res.status(500).json({
-      message: err.message,
-    });
-  }
-});
+            <p className="mt-2 text-slate-400">
+              Upload your first document to get
+              started.
+            </p>
+          </div>
+        ) : (
+          filteredDocuments.map((document) => (
+            <DocumentCard
+              key={document._id}
+              doc={document}
+              onFavorite={toggleFavorite}
+              onPin={togglePin}
+              onPreview={setPreviewId}
+              onDownload={downloadDocument}
+              onDelete={deleteDocument}
+              onSummary={generateSummary}
+            >
+              {loadingSummary ===
+                document._id && (
+                <div className="mt-4 rounded-xl border border-indigo-500/30 bg-indigo-500/10 p-4">
+                  <p className="animate-pulse text-indigo-400">
+                    🤖 AI is generating
+                    summary...
+                  </p>
+                </div>
+              )}
 
-/* ===========================
-   Delete PDF
-=========================== */
+              {document.summary && (
+                <div className="mt-5">
+                  <ChatWithPdf
+                    documentId={document._id}
+                  />
+                </div>
+              )}
+            </DocumentCard>
+          ))
+        )}
+      </div>
 
-router.delete("/:id", async (req, res) => {
-  try {
+      {/* PDF Viewer */}
 
-    const document = await Document.findById(req.params.id);
-
-    if (!document) {
-      return res.status(404).json({
-        message: "Document not found",
-      });
-    }
-
-    if (fs.existsSync(document.filepath)) {
-      fs.unlinkSync(document.filepath);
-    }
-
-    await Document.findByIdAndDelete(req.params.id);
-
-    res.json({
-      success: true,
-      message: "PDF Deleted Successfully",
-    });
-
-  } catch (err) {
-
-    console.log(err);
-
-    res.status(500).json({
-      message: err.message,
-    });
-  }
-});
-
-module.exports = router;
+      {previewId && (
+        <PdfViewer
+          id={previewId}
+          onClose={() =>
+            setPreviewId(null)
+          }
+        />
+      )}
+    </div>
+  );
+}
