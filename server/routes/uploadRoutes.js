@@ -5,6 +5,7 @@ const path = require("path");
 const pdfParse = require("pdf-parse");
 
 const Document = require("../models/Document");
+const { protect } = require("../middleware/authMiddleware");
 
 const router = express.Router();
 
@@ -14,7 +15,6 @@ const router = express.Router();
 
 const uploadDirectory = path.join(process.cwd(), "uploads");
 
-// Render par folder missing ho to automatically create hoga
 if (!fs.existsSync(uploadDirectory)) {
   fs.mkdirSync(uploadDirectory, {
     recursive: true,
@@ -73,7 +73,7 @@ const fileFilter = (req, file, cb) => {
     return cb(null, true);
   }
 
-  cb(new Error("Unsupported file type"));
+  return cb(new Error("Unsupported file type"));
 };
 
 const upload = multer({
@@ -105,7 +105,7 @@ function getFileType(mimetype = "") {
    Upload Route
 ===================================== */
 
-router.post("/", (req, res) => {
+router.post("/", protect, (req, res) => {
   upload.single("file")(req, res, async (uploadError) => {
     if (uploadError) {
       console.error("Multer Error:", uploadError);
@@ -142,7 +142,7 @@ router.post("/", (req, res) => {
         mimeType: req.file.mimetype,
         fileType,
         content: extractedContent,
-        uploadedBy: null,
+        uploadedBy: req.user._id,
       });
 
       return res.status(201).json({
@@ -153,7 +153,6 @@ router.post("/", (req, res) => {
     } catch (error) {
       console.error("Upload Error:", error);
 
-      // Failed database/PDF operation ke baad temporary file remove karo
       if (req.file?.path && fs.existsSync(req.file.path)) {
         fs.unlinkSync(req.file.path);
       }
